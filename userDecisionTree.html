@@ -1,0 +1,224 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <title>Marriage - Decision Tree</title>
+  <meta name="description" content="Interactive decision diagram with automatic expansion as the user makes choices." />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <script src="go.js"></script>
+  <script src="https://unpkg.com/gojs"></script>
+  <script src="require.js"></script>
+  <link href='https://fonts.googleapis.com/css?family=Roboto:400,500' rel='stylesheet' type='text/css'>
+  <script id="code">
+    var finalString = "Are you married? - This question is not yet answered.";
+    function init() {
+      var $ = go.GraphObject.make;
+      myDiagram = $(go.Diagram, "myDiagramDiv",
+        {
+          initialContentAlignment: go.Spot.Left,
+          allowSelect: false,  
+          layout: $(go.TreeLayout)
+        });
+      function buttonExpandCollapse(e, port) {
+        setFinalString(port.portId);
+        var node = port.part;
+        node.diagram.startTransaction("expand/collapse");
+        var portid = port.portId;
+        node.findLinksOutOf(portid).each(function(l) {
+          if (l.visible) {
+            collapseTree(node, portid);
+          } else {
+            l.visible = true;
+            var n = l.getOtherNode(node);
+            if (n !== null) {
+              n.location = node.getDocumentPoint(go.Spot.TopRight);
+              n.visible = true;
+            }
+          }
+        });
+        myDiagram.toolManager.hideToolTip();
+        node.diagram.commitTransaction("expand/collapse");
+      }
+
+       function collapseTree(node, portid) {
+        node.findLinksOutOf(portid).each(function(l) {
+          l.visible = false;
+          var n = l.getOtherNode(node);
+          if (n !== null) {
+            n.visible = false;
+            collapseTree(n, null);
+          }
+        });
+      }
+
+      myDiagram.nodeTemplateMap.add("decision",
+        $(go.Node, "Auto",
+          new go.Binding("text", "key"),
+          $(go.Shape, "Rectangle",
+            { fill: "whitesmoke", stroke: "lightgray" }),
+          $(go.Panel, "Horizontal",
+            $(go.TextBlock,
+              { font: "30px Roboto, sans-serif", margin: 5 },
+              new go.Binding("text", "key")),
+            $(go.Panel, "Vertical",
+              { defaultStretch: go.GraphObject.Fill, margin: 3 },
+              $("Button",
+                {
+                  name: "ButtonA",
+                  click: buttonExpandCollapse,
+                },
+                new go.Binding("portId", "a"),
+                $(go.TextBlock,
+                  { font: '500 16px Roboto, sans-serif' },
+                  new go.Binding("text", "aText"))
+              ),
+              $("Button",
+                {
+                  name: "ButtonB",
+                  click: buttonExpandCollapse,
+                },
+                new go.Binding("portId", "b"),
+                $(go.TextBlock,
+                  { font: '500 16px Roboto, sans-serif' },
+                  new go.Binding("text", "bText"))
+              ) 
+            )  
+          )  
+        ));  
+
+      myDiagram.linkTemplate =
+        $(go.Link, go.Link.Orthogonal, 
+          { fromPortId: "" },
+          new go.Binding("fromPortId", "fromport"),
+          $(go.Shape,
+            { stroke: "lightblue", strokeWidth: 2 })
+        );
+
+      var model =
+        $(go.GraphLinksModel,
+          { linkFromPortIdProperty: "fromport" });
+      makeNodes(model);
+      makeLinks(model);
+      myDiagram.model = model;
+      myDiagram.nodes.each(function(n) {
+        if (n.text !== "Are you married?") n.visible = false;
+      });
+      myDiagram.links.each(function(l) {
+        l.visible = false;
+      });
+    }    
+    function makeNodes(model) {
+      var nodeDataArray = [
+        { key: "Are you married?"},
+        { key: "Y"},
+        { key: "N" },
+        { key: "YL"},
+        { key: "YG"},
+        { key: "NP" },
+        { key: "NS" },
+      ];
+      for (var i = 0; i < nodeDataArray.length; i++) {
+        var d = nodeDataArray[i];
+        if (d.key === "Are you married?") {
+          d.category = "decision";
+          d.a = "Y";
+          d.aText = "Yes, I'm married";
+          d.b = "N";
+          d.bText = "No, I didn't marry yet";
+        } else {
+          switch (d.key.length) {
+            case 1:
+              if(d.key === "Y") {
+                d.category = "decision";
+                d.a = "L";
+                d.aText = "Married for less than 5 Years";
+                d.b = "G";
+                d.bText = "Married for more than 5 Years";
+              } else {
+                d.category = "decision";
+                d.a = "P";
+                d.aText = "Will you ever get married? - Probably, Yes";
+                d.b = "S";
+                d.bText = "Will you ever get married? - Sorry, No";
+              }
+              break;
+            default:
+              d.category = "marriage";
+              break;
+          }
+        }
+      }
+      model.nodeDataArray = nodeDataArray;
+    }
+
+    function makeLinks(model) {
+      var linkDataArray = [];
+      var nda = model.nodeDataArray;
+      for (var i = 0; i < nda.length; i++) {
+        var key = nda[i].key;
+        if (key === "Are you married?" || key.length === 0) continue;
+        var prefix = key.slice(0, key.length - 1);
+        var letter = key.charAt(key.length - 1);
+        if (prefix.length === 0) prefix = "Are you married?";
+        var obj = { from: prefix, fromport: letter, to: key };
+        linkDataArray.push(obj);
+      }
+      model.linkDataArray = linkDataArray;
+    }
+
+    function generatePdf(action) {
+      var pageSize = "LETTER";
+      var pageOptions = {
+        size: pageSize
+      };
+      require(["blob-stream", "pdfkit"], function(blobStream, PDFDocument) {
+        var doc = new PDFDocument(pageOptions);
+        var stream = doc.pipe(blobStream());
+        doc.text(finalString);
+        doc.end();
+        stream.on('finish', function() { action(stream.toBlob('application/pdf')); });
+      });
+    }
+
+    function downloadPdf() {
+      generatePdf(function(blob) {
+        var datauri = window.URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.style = "display: none";
+        a.href = datauri;
+        a.download = "myDiagram.pdf";
+        document.body.appendChild(a);
+        requestAnimationFrame(function() {
+          a.click();
+          window.URL.revokeObjectURL(datauri);
+          document.body.removeChild(a);
+        });
+      });
+    }
+
+    function setFinalString(portId){
+      if(portId == "Y"){
+        finalString = "User responded that he / she is married.";
+      } else if (portId == "N"){
+        finalString = "User responded that he / she is not married.";
+      } else if (portId == "L"){
+        finalString = "User responded that he / she is married for less than 5 Years.";
+      } else if (portId == "G"){
+        finalString = "User responded that he / she is married for more than 5 Years.";
+      } else if (portId == "P"){
+        finalString = "User responded that he / she is not married and might sooner or later plan to get married.";
+      } else if (portId == "S"){
+        finalString = "User responded that he / she is not married and might never get married.";
+      }
+    }
+
+
+  </script>
+</head>
+<body onload="init()">
+<div id="sample">
+  <div id="myDiagramDiv" style="background-color: white; border: solid 1px black; width: 100%; height: 500px"></div>
+  <button onclick="downloadPdf()">Download PDF</button></div>
+</div>
+</body>
+</html>
